@@ -1,0 +1,189 @@
+     1                  ;------------------------------------------------------------------------
+     2                  ; Program zegaraelektronicznego w oknie LCD
+     3                  ;   Zegar wyświetla godziny, minuty i sekundy (00:00:00)
+     4                  ;   Ent jest obsługiwanym klawiszem (naprzemiennie start/stop stopera)
+     5                  ;------------------------------------------------------------------------
+     6                  
+     7        0020      CZAS_HOUR EQU 20H      ; Godziny
+     8        0021      CZAS_MIN  EQU 21H      ; Minuty
+     9        0022      CZAS_SEC  EQU 22H      ; Sekundy
+    10        0023      LECI      EQU 23H      ; start/stop minutnika - zmienna bitowa (0/1)
+    11        0095      BRZECZYK  EQU P1.5     ; Brzęczyk podłączony do P1.5
+    12        0097      DIODA     EQU P1.7     ; Dioda podłączona do P1.7
+    13        0024      LICZNIK_50MS EQU 24H   ; Licznik przerwań co 50 ms
+    14        0025      POP_HOUR EQU 25H       ; Poprzednia godzina
+    15                  
+    16        0000      BRAMKA0 EQU 0          ; brak bramkowania timera nr 0
+    17        0000      LINIA0  EQU 0          ; zliczanie taktów zegara
+    18        0001      TRYB0   EQU 1          ; tryb liczenia (2 bajtowy)
+    19        0001      STERUJ0 EQU TRYB0+4*LINIA0+8*BRAMKA0  ; słowo sterujące timera nr 0
+    20        004C      LADUJ0  EQU 256-180    ; przeładowanie co 50 ms
+    21                  
+    22  0000: 02 01 00      LJMP    START
+    23                  
+    24  0003:               ORG    03H                ; przerwanie z wejścia zewnętrznego nr 0
+    25  0003: 32            RETI                        ; pusta obsługa
+    26  000B:               ORG    0BH                ; przerwanie z timera nr 0
+    27  000B: 02 01 9C      LJMP    MINUTNIK            ; skok do właściwej procedury obsługi
+    28  0013:               ORG    13H                ; przerwanie z wejścia zewnętrznego nr 1
+    29  0013: 32            RETI                        ; pusta obsługa
+    30  001B:               ORG    1BH    
+    31  001B: 32            RETI                        ; przerwanie z timera nr 1
+    32                      ; pusta obsługa
+    33  0023:               ORG    23H                ; przerwanie z transmisji szeregowej (RS)
+    34  0023: 32            RETI                        ; pusta obsługa
+    35                  
+    36  0100:               ORG    100H
+    37  0100:           START:                        ; początek programu
+    38  0100: 12 81 08      LCALL    LCD_INIT        ; włączenie okna LCD
+    39  0103: 75 20 00      MOV    CZAS_HOUR, #0      ; ustawienie początkowych godzin
+    40  0106: 75 21 00      MOV    CZAS_MIN, #0       ; ustawienie początkowych minut
+    41  0109: 75 22 00      MOV    CZAS_SEC, #0      ; ustawienie początkowych sekund
+    42  010C: 75 23 00      MOV    LECI, #0           ; zatrzymanie minutnika
+    43  010F: 75 24 14      MOV    LICZNIK_50MS, #20  ; ustawienie licznika przerwań co 50 ms
+    44  0112: 75 25 00      MOV    POP_HOUR, #0       ; ustawienie początkowej poprzedniej godziny
+    45  0115: 12 01 6D      LCALL    AKTUALIZUJ_LCD_MAIN
+    46  0118: 75 89 01      MOV    TMOD, #STERUJ0    ; zaprogramowanie timera
+    47  011B: 75 8A 00      MOV    TL0, #0            ; załadowanie bajtów
+    48  011E: 75 8C 4C      MOV    TH0, #LADUJ0       ; timera nr 0
+    49  0121: D2 A9         SETB    ET0            ; odblokowanie przerwania z timera nr 0
+    50  0123: D2 AF         SETB    EA            ; odblokowanie systemu przerwań
+    51  0125: D2 8C         SETB    TR0            ; włączenie timera nr 0
+    52  0127:           PETLA:                        ; pętla programu głównego
+    53  0127: 12 81 1C      LCALL    WAIT_KEY        ; czytanie klawiatury
+    54  012A: B4 0E 05      CJNE    A, #14, KLAWISZ_A    ; klawisz inny niż Esc - ignorowany
+    55  012D: 63 23 01      XRL    LECI, #1            ; klawisz Esc – start/stop minutnika
+    56  0130: 80 F5         SJMP    PETLA            ; powrót do pętli głównej programu
+    57  0132:           KLAWISZ_A:
+    58  0132: B4 0F 10      CJNE    A, #15, KLAWISZ_B ; sprawdzenie czy klawisz to "Ent"
+    59  0135: 75 20 00      MOV CZAS_HOUR, #0
+    60  0138: 75 21 00      MOV CZAS_MIN, #0
+    61  013B: 75 22 00      MOV CZAS_SEC, #0
+    62  013E: C2 95         CLR BRZECZYK           ; Wyłącz brzęczyk (P1.5 = 0)
+    63  0140: 12 01 6D      LCALL    AKTUALIZUJ_LCD_MAIN
+    64  0143: 80 E2         SJMP    PETLA           ; powrót do pętli głównej programu
+    65  0145:           KLAWISZ_B:
+    66  0145: B4 0C 11      CJNE    A, #12, KLAWISZ_C    ; sprawdzenie czy klawisz to ">"
+    67  0148: E5 21         MOV A, CZAS_MIN
+    68  014A: B4 3B 05      CJNE A, #59, INKREMENTUJ_MINUTY ; jeśli CZAS_MIN != 59, inkrementuj
+    69  014D: 75 21 00      MOV CZAS_MIN, #0                    ; jeśli CZAS_MIN == 59, ustaw na 0
+    70  0150: 80 1B         SJMP    AKTUALIZUJ_LCD_MAIN
+    71  0152:           INKREMENTUJ_MINUTY:
+    72  0152: 05 21         INC CZAS_MIN
+    73  0154: 12 01 6D      LCALL    AKTUALIZUJ_LCD_MAIN
+    74  0157: 80 CE         SJMP    PETLA           ; powrót do pętli głównej programu
+    75  0159:           KLAWISZ_C:
+    76  0159: B4 0B CB      CJNE A, #11, PETLA    ; sprawdzenie czy klawisz to "<"
+    77  015C: E5 20         MOV A, CZAS_HOUR
+    78  015E: B4 0D 05      CJNE A, #13, INKREMENTUJ_GODZINY ; jeśli CZAS_HOUR != 13, inkrementuj
+    79  0161: 75 20 01      MOV CZAS_HOUR, #1                   ; jeśli CZAS_HOUR == 13, ustaw na 1
+    80  0164: 80 07         SJMP    AKTUALIZUJ_LCD_MAIN
+    81  0166:           INKREMENTUJ_GODZINY:
+    82  0166: 05 20         INC CZAS_HOUR
+    83  0168: 12 01 6D      LCALL    AKTUALIZUJ_LCD_MAIN
+    84  016B: 80 BA         SJMP    PETLA           ; powrót do pętli głównej programu
+    85                  
+    86  016D:           AKTUALIZUJ_LCD_MAIN:
+    87  016D: 12 81 0C      LCALL LCD_CLR           ; Wyczyść okno LCD
+    88  0170: E5 20         MOV A, CZAS_HOUR        ; Do aktualnych godzin
+    89  0172: 12 02 02      LCALL PISZ_DEC2        ; Wypisz godziny
+    90  0175: 74 3A         MOV A, #':'
+    91  0177: 12 01 DA      LCALL PISZ_ZNAK
+    92  017A: E5 21         MOV A, CZAS_MIN        ; Do aktualnych minut
+    93  017C: 12 02 02      LCALL PISZ_DEC2        ; Wypisz minuty
+    94  017F: 74 3A         MOV A, #':'
+    95  0181: 12 01 DA      LCALL PISZ_ZNAK
+    96  0184: E5 22         MOV A, CZAS_SEC
+    97  0186: 12 02 02      LCALL PISZ_DEC2        ; Wypisz sekundy
+    98                  
+    99                      ; Sprawdź, czy godzina zmienia się na 12 i zmień stan diody
+   100  0189: E5 25         MOV A, POP_HOUR
+   101  018B: B5 20 02      CJNE A, CZAS_HOUR, SPRAWDZ_12   ; Jeśli godzina się zmieniła, sprawdź dalej
+   102  018E: 80 0B         SJMP KONIEC                    ; Jeśli godzina się nie zmieniła, zakończ
+   103                  
+   104  0190:           SPRAWDZ_12:
+   105  0190: E5 20         MOV A, CZAS_HOUR
+   106  0192: B4 0C 02      CJNE A, #12, AKTUALIZUJ_POP_HOUR ; Jeśli godzina != 12, aktualizuj POP_HOUR
+   107  0195: B2 97         CPL P1.7                         ; Jeśli godzina == 12, zmień stan diody
+   108                  
+   109  0197:           AKTUALIZUJ_POP_HOUR:
+   110  0197: E5 20         MOV A, CZAS_HOUR
+   111  0199: F5 25         MOV POP_HOUR, A                  ; Aktualizuj poprzednią godzinę
+   112  019B:           KONIEC:
+   113  019B: 22            RET
+   114                  
+   115                  ;------------------------------------------------------------------------
+   116                  ; Procedura obsługi przerwania z timera nr 0 ()
+   117                  ;   Aktualizacja minutnika wykonywana co 50ms
+   118                  ;   Klawisz Ent naprzemiennie startuje i zatrzymuje minutnik
+   119                  ;------------------------------------------------------------------------
+   120  019C:           MINUTNIK:
+   121  019C: 75 8C 4C      MOV TH0, #LADUJ0         ; Początkowa wartość timera nr 0
+   122  019F: C0 D0         PUSH PSW                ; Zachowanie
+   123  01A1: C0 E0         PUSH ACC                ; Używanych
+   124  01A3: E8            MOV A, R0                ; Rejestrów
+   125  01A4: C0 E0         PUSH ACC                ; Na stosie
+   126  01A6: E5 23         MOV A, LECI              ; Sprawdź bit LECI
+   127  01A8: 60 28         JZ MINUTNIK_KONIEC               ; Gdy bit LECI = 0, to brak zmiany CZAS_SEC
+   128  01AA: D5 24 25      DJNZ LICZNIK_50MS, MINUTNIK_KONIEC ; Dekrementuj licznik co 50 ms i sprawdź, czy już minęła 1 sekunda
+   129  01AD: 75 24 14      MOV LICZNIK_50MS, #20    ; Resetowanie licznika 50 ms
+   130                  
+   131  01B0: E5 22         MOV A, CZAS_SEC         ; Do aktualnych CZAS_SEC (sekundy)
+   132  01B2: 04            INC A                   ; Zwiększ o 1 sekundę
+   133  01B3: F5 22         MOV CZAS_SEC, A         ; Zapamiętaj nowy CZAS_SEC
+   134  01B5: B4 3C 17      CJNE A, #60, AKTUALIZUJ_LCD_INTERRUPT ; Jeśli CZAS_SEC != 60, kontynuuj
+   135  01B8: 75 22 00      MOV CZAS_SEC, #0        ; Jeśli CZAS_SEC == 60, ustaw CZAS_SEC na 0
+   136  01BB: 05 21         INC CZAS_MIN            ; Zwiększ CZAS_MIN o 1 minutę
+   137  01BD: E5 21         MOV A, CZAS_MIN
+   138  01BF: B4 3C 0D      CJNE A, #60, AKTUALIZUJ_LCD_INTERRUPT ; Jeśli CZAS_MIN != 60, kontynuuj
+   139  01C2: 75 21 00      MOV CZAS_MIN, #0        ; Jeśli CZAS_MIN == 60, ustaw CZAS_MIN na 0
+   140  01C5: 05 20         INC CZAS_HOUR           ; Zwiększ CZAS_HOUR o 1 godzinę
+   141  01C7: E5 20         MOV A, CZAS_HOUR
+   142  01C9: B4 0D 03      CJNE A, #13, AKTUALIZUJ_LCD_INTERRUPT ; Jeśli CZAS_HOUR != 13, kontynuuj
+   143  01CC: 75 20 01      MOV CZAS_HOUR, #1       ; Jeśli CZAS_HOUR == 13, ustaw CZAS_HOUR na 1
+   144  01CF:           AKTUALIZUJ_LCD_INTERRUPT:
+   145  01CF: 12 01 6D      LCALL    AKTUALIZUJ_LCD_MAIN ; Zaktualizuj wyświetlacz po zmianie czasu
+   146  01D2:           MINUTNIK_KONIEC:
+   147  01D2: D0 E0         POP ACC                 ; Odtworzenie
+   148  01D4: F8            MOV R0, A               ; Używanych
+   149  01D5: D0 E0         POP ACC                 ; Rejestrów
+   150  01D7: D0 D0         POP PSW                 ; Ze stosu
+   151  01D9: 32            RETI                    ; Wyjście z przerwania
+   152                  
+   153  01DA:           PISZ_ZNAK:
+   154  01DA: 12 01 EE      LCALL    LCD_GOTOWY
+   155  01DD: C0 E0         PUSH    ACC
+   156  01DF: C0 82         PUSH    DPL
+   157  01E1: C0 83         PUSH    DPH
+   158  01E3: 90 FF 81      MOV    DPTR,#LCDWD+0FF00H
+   159  01E6: F0            MOVX    @DPTR,A
+   160  01E7: D0 83         POP    DPH
+   161  01E9: D0 82         POP    DPL
+   162  01EB: D0 E0         POP    ACC
+   163  01ED: 22            RET
+   164  01EE:           LCD_GOTOWY:
+   165  01EE: C0 E0         PUSH    ACC
+   166  01F0: C0 83         PUSH    DPH
+   167  01F2: C0 82         PUSH    DPL
+   168  01F4: 90 FF 82      MOV    DPTR,#LCDRC+0FF00H
+   169  01F7:           CZEKAJ:
+   170  01F7: E0            MOVX    A,@DPTR
+   171  01F8: 20 E7 FC      JB    ACC.7,CZEKAJ
+   172  01FB: D0 83         POP    DPH
+   173  01FD: D0 82         POP    DPL
+   174  01FF: D0 E0         POP    ACC
+   175  0201: 22            RET
+   176                  
+   177  0202:           PISZ_DEC2:
+   178  0202: C0 E0         PUSH    ACC
+   179  0204: C0 F0         PUSH    B
+   180  0206: 75 F0 0A      MOV    B, #10
+   181  0209: 84            DIV    AB
+   182  020A: 24 30         ADD    A, #30H
+   183  020C: 12 01 DA      LCALL   PISZ_ZNAK
+   184  020F: E5 F0         MOV     A, B
+   185  0211: 24 30         ADD     A, #30H
+   186  0213: 12 01 DA      LCALL   PISZ_ZNAK
+   187  0216: D0 F0         POP     B
+   188  0218: D0 E0         POP     ACC
+   189  021A: 22            RET
